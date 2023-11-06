@@ -1,79 +1,115 @@
-# Defining a StockTradingEnvironment class to simulate a stock trading environment
 class StockTradingEnvironment:
-    # Initializing the environment with stock data
-    def __init__(self, data):
-        # Stock data (e.g., historical prices)
-        self.data = data
-        # Current timestep in the simulation
+    def __init__(self, data_stock1, data_stock2, transaction_cost=0.0001):
+        # Historical data for stock 1
+        self.data1 = data_stock1
+        # Historical data for stock 2
+        self.data2 = data_stock2
+        # Current step in the environment
         self.current_step = 0
-        # Last known stock price
-        self.last_price = None
-        # Initial cash in hand
-        self.cash = 100000
-        # Number of stocks owned
-        self.stock_owned = 0
+        # Last known price for stock 1
+        self.last_price1 = None
+        # Last known price for stock 2
+        self.last_price2 = None
+
+        # Initial cash in hand for stock 1
+        self.cash_stock1 = 100000 / 2  # Split initial cash between the two stocks
+        # Initial cash in hand for stock 2
+        self.cash_stock2 = 100000 / 2
+
+        # Number of stock 1 shares owned
+        self.stock_owned_stock1 = 0
+        # Number of stock 2 shares owned
+        self.stock_owned_stock2 = 0
+
+        self.transaction_cost = transaction_cost
 
     def _discretize_state(self, current_open_price, previous_open_price):
-        """Discretize the open price based on its relation to the previous day's open price."""
-        # If the current price is less than the previous price, the price has decreased
-        if current_open_price < previous_open_price:
-            price_movement = "Decrease"
-        # If the current price is greater than the previous price, the price has increased
-        elif current_open_price > previous_open_price:
-            price_movement = "Increase"
-        # If the current price is the same as the previous price
+        # Discretize the state based on the percentage change in open price
+        if abs((current_open_price - previous_open_price) / previous_open_price) <= 0.003:
+            return "Same"
+        elif current_open_price < previous_open_price:
+            return "Decrease"
         else:
-            price_movement = "Same"
-        return price_movement
+            return "Increase"
 
     def reset(self):
-        # Resetting the environment to its initial state
+        # Reset the environment to its initial state
         self.current_step = 0
-        # Setting the last price to the opening price of the first day
-        self.last_price = self.data.iloc[self.current_step]['Open']
-        # Resetting cash in hand
-        self.cash = 100000
-        # Resetting the number of stocks owned
-        self.stock_owned = 0
-        # For the first step, we'll use the same price as both current and previous
-        return self._discretize_state(self.last_price, self.last_price)
+        self.last_price1 = self.data1.iloc[self.current_step]['Open']
+        self.last_price2 = self.data2.iloc[self.current_step]['Open']
 
-    def step(self, action):
-        # Move to the next timestep
+        # Calculate the percentage change for both stocks
+        change1 = (self.data1.iloc[self.current_step]['Open'] - self.data1.iloc[self.current_step - 1]['Open']) / \
+                  self.data1.iloc[self.current_step - 1]['Open']
+        change2 = (self.data2.iloc[self.current_step]['Open'] - self.data2.iloc[self.current_step - 1]['Open']) / \
+                  self.data2.iloc[self.current_step - 1]['Open']
+
+        # Calculate the total cash in hand
+        total_cash = self.cash_stock1 + self.cash_stock2
+
+        # Distribute the cash based on the ratio of the percentage changes
+        self.cash_stock1 = total_cash * (change1 / (change1 + change2))
+        self.cash_stock2 = total_cash * (change2 / (change1 + change2))
+
+        # Reset the number of shares owned for both stocks
+        self.stock_owned_stock1 = 0
+        self.stock_owned_stock2 = 0
+
+        return self._discretize_state(self.last_price1, self.last_price1), self._discretize_state(self.last_price2,
+                                                                                                  self.last_price2)
+
+    def step(self, action1, action2):
+        # Take a step in the environment based on the actions provided for both stocks
         self.current_step += 1
-        # Get the current opening price
-        current_price = self.data.iloc[self.current_step]['Open']
-        # Get the previous opening price
-        previous_price = self.data.iloc[self.current_step - 1]['Open'] if self.current_step > 0 else self.last_price
+        current_price1 = self.data1.iloc[self.current_step]['Open']
+        current_price2 = self.data2.iloc[self.current_step]['Open']
 
-        # If the action is to buy
-        if action == 0:  # Buy
-            # Calculate the number of stocks that can be bought with the current cash
-            stocks_to_buy = self.cash // current_price
-            # Deduct the cost of the stocks from the cash
-            self.cash -= stocks_to_buy * current_price
-            # Increase the number of stocks owned
-            self.stock_owned += stocks_to_buy
-        # If the action is to sell
-        elif action == 1:  # Sell
-            # Add the value of the stocks sold to the cash
-            self.cash += self.stock_owned * current_price
-            # Reset the number of stocks owned to zero
-            self.stock_owned = 0
-        # If action == 2, it's a "Hold" action, so no changes are made
+        # Get the previous price for both stocks
+        previous_price1 = self.data1.iloc[self.current_step - 1]['Open'] if self.current_step > 0 else self.last_price1
+        previous_price2 = self.data2.iloc[self.current_step - 1]['Open'] if self.current_step > 0 else self.last_price2
 
-        # Calculate the total value of the portfolio (cash + value of stocks)
-        next_portfolio_value = self.cash + self.stock_owned * current_price
-        # Calculate the reward as the difference in portfolio value from the last step
-        reward = next_portfolio_value - (self.cash + self.stock_owned * self.last_price)
-        # Update the last known price
-        self.last_price = current_price
+        # Handle buy/sell actions for stock 1
+        # Handle actions for stock 1
+        if action1 == 0:
+            stocks_to_buy = self.cash_stock1 // current_price1
+            self.cash_stock1 -= stocks_to_buy * current_price1 * (
+                        1 + self.transaction_cost)  # Deduct transaction cost for buying
+            self.stock_owned_stock1 += stocks_to_buy
+        elif action1 == 1:
+            self.cash_stock1 += self.stock_owned_stock1 * current_price1 * (
+                        1 - self.transaction_cost)  # Deduct transaction cost for selling
+            self.stock_owned_stock1 = 0
 
-        # Check if the simulation has reached the end of the data
-        done = self.current_step == len(self.data) - 1 or (
-                    self.cash <= 0 and self.stock_owned <= 0)  # End episode on bankruptcy
-        # Get the next state based on the current and previous prices
-        next_state = self._discretize_state(current_price, previous_price)
+            # Handle actions for stock 2
+            if action2 == 0:
+                stocks_to_buy = self.cash_stock2 // current_price2
+                self.cash_stock2 -= stocks_to_buy * current_price2 * (
+                            1 + self.transaction_cost)  # Deduct transaction cost for buying
+                self.stock_owned_stock2 += stocks_to_buy
+            elif action2 == 1:
+                self.cash_stock2 += self.stock_owned_stock2 * current_price2 * (
+                            1 - self.transaction_cost)  # Deduct transaction cost for selling
+                self.stock_owned_stock2 = 0
 
-        # Return the next state, reward, and whether the simulation is done
-        return next_state, reward, done
+        # Calculate the total portfolio value for both stocks
+        next_portfolio_value1 = self.cash_stock1 + self.stock_owned_stock1 * current_price1
+        next_portfolio_value2 = self.cash_stock2 + self.stock_owned_stock2 * current_price2
+
+        # Calculate the reward based on the change in portfolio value
+        reward1 = next_portfolio_value1 - (self.cash_stock1 + self.stock_owned_stock1 * self.last_price1)
+        reward2 = next_portfolio_value2 - (self.cash_stock2 + self.stock_owned_stock2 * self.last_price2)
+
+        # Update the last known prices for both stocks
+        self.last_price1 = current_price1
+        self.last_price2 = current_price2
+
+        # Check if the episode is done (end of data or no money and stocks left)
+        done = self.current_step == len(self.data1) - 1 or (self.cash_stock1 <= 0 and self.stock_owned_stock1 <= 0) or (
+                    self.cash_stock2 <= 0 and self.stock_owned_stock2 <= 0)
+
+        # Get the next state for both stocks
+        next_state1 = self._discretize_state(current_price1, previous_price1)
+        next_state2 = self._discretize_state(current_price2, previous_price2)
+
+        return (next_state1, reward1, done), (next_state2, reward2, done)
+
